@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CBSE Grade Calculator - Jaisankar</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a href='https://www.counters-free.net/'>Initializing...</a> <script type='text/javascript' src='https://www.freevisitorcounters.com/auth.php?id=5bc97577a8eb475bde238f20420ead42ad8ad725'></script>
+<script type="text/javascript" src="https://www.freevisitorcounters.com/en/home/counter/1517560/t/13"></script>
+
+<div class="header">
+  <h2>CBSE Grade Calculator - V5.01</h2>
+</div>
+
+<div class="input-section" id="inputSection">
+  <p style="font-weight: 600; color: #444; margin-bottom: 16px; font-size: 17px;">
+    Select the total maximum marks:
+  </p>
+  <div class="radio-group">
+    <div class="radio-option">
+      <input type="radio" id="marks100" name="totalMarks" value="100" onchange="enableEntry()">
+      <label for="marks100">Total Marks: 100</label>
+    </div>
+    <div class="radio-option">
+      <input type="radio" id="marks50" name="totalMarks" value="50" onchange="enableEntry()">
+      <label for="marks50">Total Marks: 50 </label>
+    </div>
+  </div>
+  <div id="entryArea" style="display:none; margin-top: 28px;">
+    <p style="font-weight: 600; color: #333; margin-bottom: 12px; font-size: 16px;">
+      Enter or Paste your marks (one per line)
+    </p>
+    <textarea id="mainInputArea"
+      placeholder="Paste here (from Excel, WhatsApp, PDF...) or type manually&#10;&#10;Examples:&#10;78&#10;absent&#10;92.5&#10;A&#10;65&#10;AB&#10;-&#10;..."
+    ></textarea>
+    <div style="display: flex; gap: 16px; justify-content: center; flex-wrap: wrap;">
+      <button class="import-btn" onclick="processFromMainArea()">Calculate Grades →</button>
+      <button class="cancel-btn" onclick="clearMainInput()">Clear Text</button>
+    </div>
+  </div>
+</div>
+
+<button class="show-input-btn" id="showInputBtn" onclick="resetToStart()" style="display:none; margin: 20px auto; background:#6a11cb; padding:14px 32px;">
+  Change Settings / Start Over
+</button>
+
+<div id="marksTableContainer" class="table-container"></div>
+<div id="summaryContainer" class="table-container"></div>
+<div id="refTableContainer" class="table-container"></div>
+<div class="info" id="infoText"></div>
+
+<div class="copy-notification notification" id="copyNotification">Grades copied!</div>
+<div class="paste-notification notification" id="pasteNotification">Grades calculated!</div>
+
+<script src="script.js"></script>
+</body>
+</html>
