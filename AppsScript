@@ -1,0 +1,971 @@
+/*
+ * Google Apps Script for handling App Inventor extension requests.
+ * Interacts with Google Sheets and Google Drive.
+ * Author: Still_Learnig @Jaisankar E
+ * Email: rss.nse@gmail.com, jai.cuddalore@gmail.com
+ * Created: June 2025
+ * License: MIT License
+ *
+ * Copyright (c) 2025 [Still_Learning]
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+// Configuration: Replace with valid IDs
+const FALLBACK_SPREADSHEET_ID = "Your Sheet ID"; // Replace with a valid Google Sheets ID
+const FALLBACK_SHEET_NAME = "Sheet1"; // Default sheet name if not provided
+const DEFAULT_FOLDER_ID = "your_valid_folder_id_here"; // Replace with a valid Google Drive folder ID
+
+// Utility function for parameter validation
+
+
+function validateParams(e, required) {
+  required.forEach(param => {
+    if (!e.parameter[param]) throw new Error(`Missing required parameter: ${param}`);
+  });
+}
+
+// Utility function to sanitize input
+function sanitizeInput(input) {
+  return input ? input.replace(/[<>"';]/g, "") : "";
+}
+
+// Utility function to validate A1 notation range
+function validateRange(range) {
+  if (!range.match(/^[A-Z]+[0-9]+(:[A-Z]+[0-9]+)?$/)) {
+    throw new Error("Invalid range format: Must be A1 notation (e.g., A1 or A1:C10)");
+  }
+}
+
+
+
+
+// Get spreadsheet dynamically based on parameter or fallback
+function getSpreadsheet(e) {
+  const spreadsheetId = e.parameter.spreadsheetId || FALLBACK_SPREADSHEET_ID;
+  if (!spreadsheetId || spreadsheetId.trim() === "" || spreadsheetId === "your_valid_spreadsheet_id_here") {
+    throw new Error("Invalid Spreadsheet ID. Provide a valid spreadsheetId parameter or update FALLBACK_SPREADSHEET_ID.");
+  }
+  return SpreadsheetApp.openById(spreadsheetId);
+}
+
+// 1. Send Data to Google Sheet
+
+function sendDataToSheet(e) {
+  validateParams(e, ["data"]);
+  const ss = getSpreadsheet(e);
+  const sheetName = e.parameter.sheetName || FALLBACK_SHEET_NAME;
+  const data = JSON.parse(e.parameter.data); // Skip sanitizeInput for JSON
+  const range = e.parameter.range || "A1";
+  const append = e.parameter.append === "true";
+  
+  if (!Array.isArray(data) || !data.every(row => Array.isArray(row))) {
+    throw new Error("Data must be a 2D array");
+  }
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Sheet '${sheetName}' not found`);
+  
+  if (!append) validateRange(range);
+  
+  if (append) {
+    sheet.appendRow(data.flat());
+  } else {
+    sheet.getRange(range).setValues(data);
+  }
+  return { status: "success", data: null, message: "Data written to sheet" };
+}
+
+
+// 2. Edit Data
+function editData(e) {
+  validateParams(e, ["value", "range"]);
+  const ss = getSpreadsheet(e);
+  const sheetName = e.parameter.sheetName || FALLBACK_SHEET_NAME;
+  const range = sanitizeInput(e.parameter.range);
+  const value = JSON.parse(e.parameter.value);
+  validateRange(range);
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Sheet '${sheetName}' not found`);
+  if (!Array.isArray(value) && typeof value !== 'string' && typeof value !== 'number') {
+    throw new Error("Value must be a string, number, or array");
+  }
+  if (Array.isArray(value)) {
+    sheet.getRange(range).setValues(value);
+  } else {
+    sheet.getRange(range).setValue(value);
+  }
+  return { status: "success", data: null, message: "Data edited" };
+}
+
+// 3. Delete Data
+function deleteData(e) {
+  const ss = getSpreadsheet(e);
+  const sheetName = e.parameter.sheetName || FALLBACK_SHEET_NAME;
+  const range = e.parameter.range || null;
+  const row = parseInt(e.parameter.row) || null;
+  const column = parseInt(e.parameter.column) || null;
+  
+  if (range && (row || column)) {
+    throw new Error("Specify either range, row, or column, not multiple");
+  }
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Sheet '${sheetName}' not found`);
+  
+  if (range) {
+    validateRange(range);
+    sheet.getRange(range).clearContent();
+  }
+  if (row && row > 0 && row <= sheet.getLastRow()) {
+    sheet.deleteRow(row);
+  }
+  if (column && column > 0 && column <= sheet.getLastColumn()) {
+    sheet.deleteColumn(column);
+  }
+  return { status: "success", data: null, message: "Data deleted" };
+}
+
+// 4. Search Data
+function searchData(e) {
+  validateParams(e, ["searchText"]);
+  const ss = getSpreadsheet(e);
+  const sheetName = e.parameter.sheetName || FALLBACK_SHEET_NAME;
+  const searchText = sanitizeInput(e.parameter.searchText);
+  
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Sheet '${sheetName}' not found`);
+  
+  const textFinder = sheet.createTextFinder(searchText);
+  const ranges = textFinder.findAll();
+  const results = ranges.map(range => ({
+    row: range.getRow(),
+    column: range.getColumn(),
+    value: range.getValue()
+  }));
+  return { status: "success", data: results, message: "Search completed" };
+}
+
+// 5. Set Formula
+function setFormula(e) {
+  validateParams(e, ["range", "formula"]);
+  const ss = getSpreadsheet(e);
+  const sheetName = sanitizeInput(e.parameter.sheetName || FALLBACK_SHEET_NAME);
+  const range = sanitizeInput(e.parameter.range);
+  const formula = e.parameter.formula; // Skip sanitizeInput for formula
+  validateRange(range);
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Sheet '${sheetName}' not found`);
+  if (formula.startsWith("[") && formula.endsWith("]")) {
+    const parsedFormula = JSON.parse(e.parameter.formula);
+    if (!Array.isArray(parsedFormula)) throw new Error("Formula array must be valid");
+    sheet.getRange(range).setFormulas(parsedFormula);
+  } else {
+    sheet.getRange(range).setFormula(formula);
+  }
+  return { status: "success", data: null, message: "Formula applied to range" };
+}
+
+// 6. Set Formula and Read Result
+function setFormulaAndRead(e) {
+  validateParams(e, ["resultCell", "formula"]);
+  const ss = getSpreadsheet(e);
+  const sheetName = e.parameter.sheetName || FALLBACK_SHEET_NAME;
+  const resultCell = sanitizeInput(e.parameter.resultCell);
+  const formula = sanitizeInput(e.parameter.formula);
+  
+  if (!resultCell.match(/^[A-Z]+[0-9]+$/)) {
+    throw new Error("Invalid result cell: Must be A1 notation (e.g., B1)");
+  }
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Sheet '${sheetName}' not found`);
+  
+  sheet.getRange(resultCell).setFormula(formula);
+  const result = sheet.getRange(resultCell).getValue();
+  return { status: "success", data: result, message: "Formula set and result read" };
+}
+
+// 7. Query Data
+
+function queryData(e) {
+  const sheetName = e.parameter.sheetName;
+  const query = e.parameter.query;
+  const cellRange = e.parameter.cellRange;
+
+  const ss = SpreadsheetApp.openById(e.parameter.spreadsheetId);
+  const sheet = ss.getSheetByName(sheetName);
+  const data = sheet.getRange(cellRange).getValues();
+
+  if (!query || !query.includes("WHERE")) {
+    // No filter → return all
+    return {
+      status: "success",
+      data: data
+    };
+  }
+
+  // 👉 Extract WHERE part
+  let wherePart = query.split("WHERE")[1].trim();
+
+  // 👉 Example: A = 'fgf'
+  let [left, right] = wherePart.split("=");
+
+  if (!left || !right) {
+    return {
+      status: "error",
+      message: "Invalid WHERE condition"
+    };
+  }
+
+  left = left.trim();   // A
+  right = right.trim(); // 'fgf'
+
+  // remove quotes
+  if (right.startsWith("'") && right.endsWith("'")) {
+    right = right.slice(1, -1);
+  }
+
+  // column index (A → 0, B → 1)
+  let colIndex = left.charCodeAt(0) - 65;
+
+  // 👉 FILTER (THIS IS THE KEY LINE)
+  let result = data.filter(row => {
+    let cell = row[colIndex];
+
+    if (cell === null || cell === undefined) return false;
+
+    return cell.toString().trim() === right;
+  });
+
+  return {
+    status: "success",
+    data: result
+  };
+}
+// ------------------------
+// 🔥 CONDITION PARSER
+// ------------------------
+function evaluateCondition(cond, row) {
+  cond = cond.trim();
+
+  // Support: A = 'fgf'
+  let parts = cond.split("AND");
+
+  return parts.every(part => {
+    part = part.trim();
+
+    let operator;
+    if (part.includes(">=")) operator = ">=";
+    else if (part.includes("<=")) operator = "<=";
+    else if (part.includes("=")) operator = "=";
+    else if (part.includes(">")) operator = ">";
+    else if (part.includes("<")) operator = "<";
+    else return true;
+
+    let [left, right] = part.split(operator);
+
+    if (!left || !right) return true;
+
+    left = left.trim();
+    right = right.trim();
+
+    // Remove quotes
+    if (right.startsWith("'") && right.endsWith("'")) {
+      right = right.slice(1, -1);
+    }
+
+    // Column index
+    let colIndex;
+    if (left.startsWith("COL")) {
+      colIndex = parseInt(left.replace("COL", "")) - 1;
+    } else {
+      colIndex = left.charCodeAt(0) - 65;
+    }
+
+    let cellValue = row[colIndex];
+
+    // Normalize values
+    cellValue = cellValue !== null ? cellValue.toString().trim() : "";
+    let value = right;
+
+    // Convert number if needed
+    if (!isNaN(value) && value !== "") value = Number(value);
+
+    switch (operator) {
+      case "=": return cellValue == value;
+      case ">": return Number(cellValue) > value;
+      case "<": return Number(cellValue) < value;
+      case ">=": return Number(cellValue) >= value;
+      case "<=": return Number(cellValue) <= value;
+      default: return true;
+    }
+  });
+}
+// ------------------------
+// 📦 OUTPUT FUNCTION
+// ------------------------
+
+
+// 8. Read by Column
+function readByColumn(e) {
+  validateParams(e, ["column"]);
+  const ss = getSpreadsheet(e);
+  const sheetName = e.parameter.sheetName || FALLBACK_SHEET_NAME;
+  const column = sanitizeInput(e.parameter.column);
+  
+  if (!column.match(/^[A-Z]+$/)) throw new Error("Invalid column format");
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Sheet '${sheetName}' not found`);
+  
+  const lastRow = Math.min(sheet.getLastRow(), 1000); // Limit to avoid quota issues
+  const columnData = sheet.getRange(`${column}1:${column}${lastRow}`).getValues().flat().filter(val => val);
+  return { status: "success", data: columnData, message: "Column data read" };
+}
+
+// 9. Read by Row
+function readByRow(e) {
+  validateParams(e, ["row"]);
+  const ss = getSpreadsheet(e);
+  const sheetName = e.parameter.sheetName || FALLBACK_SHEET_NAME;
+  const row = parseInt(e.parameter.row);
+  
+  if (row < 1) throw new Error("Invalid row number");
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Sheet '${sheetName}' not found`);
+  
+  const rowData = sheet.getRange(`${row}:${row}`).getValues()[0];
+  return { status: "success", data: rowData, message: "Row data read" };
+}
+
+// 10. Read by Range
+function readByRange(e) {
+  validateParams(e, ["range"]);
+  const ss = getSpreadsheet(e);
+  const sheetName = e.parameter.sheetName || FALLBACK_SHEET_NAME;
+  const range = sanitizeInput(e.parameter.range);
+  
+  validateRange(range);
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Sheet '${sheetName}' not found`);
+  
+  const rangeData = sheet.getRange(range).getValues();
+  return { status: "success", data: rangeData, message: "Range data read" };
+}
+
+// 11. Delete a Sheet
+function deleteSheet(e) {
+  validateParams(e, ["sheetName"]);
+  const ss = getSpreadsheet(e);
+  const sheetName = sanitizeInput(e.parameter.sheetName);
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Sheet '${sheetName}' not found`);
+  
+  ss.deleteSheet(sheet);
+  return { status: "success", data: null, message: `Sheet '${sheetName}' deleted` };
+}
+
+// 12. Create a Sheet
+function createSheet(e) {
+  validateParams(e, ["sheetName"]);
+  const ss = getSpreadsheet(e);
+  const sheetName = sanitizeInput(e.parameter.sheetName);
+  if (ss.getSheetByName(sheetName)) throw new Error(`Sheet '${sheetName}' already exists`);
+  
+  ss.insertSheet(sheetName);
+  return { status: "success", data: null, message: `Sheet '${sheetName}' created` };
+}
+
+// 13. Apply Filter
+function applyFilter(e) {
+  validateParams(e, ["range", "columnIndex", "criteria"]);
+  const ss = getSpreadsheet(e);
+  const sheetName = e.parameter.sheetName || FALLBACK_SHEET_NAME;
+  const range = sanitizeInput(e.parameter.range);
+  const columnIndex = parseInt(e.parameter.columnIndex);
+  const criteria = sanitizeInput(e.parameter.criteria);
+  
+  validateRange(range);
+  if (columnIndex < 1) throw new Error("Invalid column index");
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Sheet '${sheetName}' not found`);
+  
+  const filterCriteria = SpreadsheetApp.newFilterCriteria()
+    .whenTextContains(criteria)
+    .build();
+  sheet.getRange(range).createFilter().setColumnFilterCriteria(columnIndex, filterCriteria);
+  return { status: "success", data: null, message: "Filter applied" };
+}
+
+// 14. Find Duplicates
+function findDuplicates(e) {
+  validateParams(e, ["column"]);
+  const ss = getSpreadsheet(e);
+  const sheetName = e.parameter.sheetName || FALLBACK_SHEET_NAME;
+  const column = sanitizeInput(e.parameter.column);
+  
+  if (!column.match(/^[A-Z]+$/)) throw new Error("Invalid column format");
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Sheet '${sheetName}' not found`);
+  
+  const data = sheet.getRange(`${column}1:${column}${sheet.getLastRow()}`).getValues().flat();
+  const seen = {};
+  const duplicates = [];
+  data.forEach((value, index) => {
+    if (value && seen[value]) duplicates.push({ value, index: index + 1 });
+    else seen[value] = true;
+  });
+  return { status: "success", data: duplicates, message: "Duplicates found" };
+}
+
+// 15. Find Text Index
+function findTextIndex(e) {
+  validateParams(e, ["searchText"]);
+  const ss = getSpreadsheet(e);
+  const sheetName = e.parameter.sheetName || FALLBACK_SHEET_NAME;
+  const searchText = sanitizeInput(e.parameter.searchText);
+  
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Sheet '${sheetName}' not found`);
+  
+  const textFinder = sheet.createTextFinder(searchText);
+  const ranges = textFinder.findAll();
+  const indices = ranges.map(range => ({
+    row: range.getRow(),
+    column: range.getColumn()
+  }));
+  return { status: "success", data: indices, message: "Text indices found" };
+}
+
+// 16. Find All Duplicate Indices
+function findAllDuplicateIndices(e) {
+  validateParams(e, ["column"]);
+  const ss = getSpreadsheet(e);
+  const sheetName = e.parameter.sheetName || FALLBACK_SHEET_NAME;
+  const column = sanitizeInput(e.parameter.column);
+  
+  if (!column.match(/^[A-Z]+$/)) throw new Error("Invalid column format");
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Sheet '${sheetName}' not found`);
+  
+  const data = sheet.getRange(`${column}1:${column}${sheet.getLastRow()}`).getValues().flat();
+  const indices = {};
+  data.forEach((value, index) => {
+    if (!indices[value]) indices[value] = [];
+    indices[value].push(index + 1);
+  });
+  const duplicates = Object.entries(indices).filter(([_, idx]) => idx.length > 1);
+  return { status: "success", data: duplicates, message: "Duplicate indices found" };
+}
+
+// 17. Upload File to Google Drive
+function uploadFileToDrive(e) {
+  validateParams(e, ["folderId", "fileName", "fileContent", "mimeType"]);
+  const folderId = sanitizeInput(e.parameter.folderId);
+  const fileName = sanitizeInput(e.parameter.fileName);
+  const fileContent = e.parameter.fileContent; // Skip sanitizeInput
+  const mimeType = e.parameter.mimeType;
+  const isBase64 = e.parameter.isBase64 === "true";
+  
+  if (!folderId || folderId === "your_valid_folder_id_here") throw new Error("Invalid folderId");
+  if (fileContent.length > 6 * 1024 * 1024) throw new Error("File content exceeds 6MB limit");
+  
+  let folder;
+  try {
+    folder = DriveApp.getFolderById(folderId);
+  } catch (err) {
+    throw new Error("Folder not found: " + folderId);
+  }
+  
+  let blob;
+  try {
+    blob = isBase64
+      ? Utilities.newBlob(Utilities.base64Decode(fileContent), mimeType, fileName)
+      : Utilities.newBlob(fileContent, mimeType, fileName);
+  } catch (err) {
+    throw new Error("Invalid file content: " + err.message);
+  }
+  
+  const file = folder.createFile(blob);
+  file.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.NONE);
+  
+  return {
+    status: "success",
+    data: {
+      url: file.getUrl(),
+      name: file.getName(),
+      mimeType: file.getMimeType(),
+      size: file.getSize()
+    },
+    message: "File uploaded"
+  };
+}
+
+// 18. Get File URL
+function getFileUrl(e) {
+  validateParams(e, ["folderId", "fileName"]);
+  const folderId = sanitizeInput(e.parameter.folderId);
+  const fileName = sanitizeInput(e.parameter.fileName);
+  
+  if (folderId === "your_valid_folder_id_here") throw new Error("Invalid folderId");
+  const folder = DriveApp.getFolderById(folderId);
+  const files = folder.getFilesByName(fileName);
+  
+  if (files.hasNext()) {
+    const file = files.next();
+    return {
+      status: "success",
+      data: { url: file.getUrl() },
+      message: "File URL retrieved"
+    };
+  }
+  return { status: "error", data: null, message: "File not found" };
+}
+
+// 19. Read All Sheet Names
+function getAllSheetNames(e) {
+  const ss = getSpreadsheet(e);
+  const sheets = ss.getSheets();
+  const sheetNames = sheets.map(sheet => sheet.getName());
+  return { status: "success", data: sheetNames, message: "Sheet names retrieved" };
+}
+
+// 20. Read All File Names in Google Drive
+function getAllFileNames(e) {
+  validateParams(e, ["folderId"]);
+  const folderId = sanitizeInput(e.parameter.folderId);
+  
+  if (folderId === "your_valid_folder_id_here") throw new Error("Invalid folderId");
+  const folder = DriveApp.getFolderById(folderId);
+  const files = folder.getFiles();
+  const fileNames = [];
+  const maxFiles = 100; // Limit to avoid quota issues
+  let count = 0;
+  
+  while (files.hasNext() && count < maxFiles) {
+    fileNames.push(files.next().getName());
+    count++;
+  }
+  return { status: "success", data: fileNames, message: "File names retrieved" };
+}
+
+// 21. Get Spreadsheet Properties
+function getSpreadsheetProperties(e) {
+  const ss = getSpreadsheet(e);
+  return {
+    status: "success",
+    data: {
+      id: ss.getId(),
+      url: ss.getUrl(),
+      name: ss.getName()
+    },
+    message: "Spreadsheet properties retrieved"
+  };
+}
+
+// 22. Clear Range
+function clearRange(e) {
+  validateParams(e, ["range"]);
+  const ss = getSpreadsheet(e);
+  const sheetName = e.parameter.sheetName || FALLBACK_SHEET_NAME;
+  const range = sanitizeInput(e.parameter.range);
+  const clearFormat = e.parameter.clearFormat === "true";
+  
+  validateRange(range);
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Sheet '${sheetName}' not found`);
+  
+  if (clearFormat) {
+    sheet.getRange(range).clear({ contentsOnly: false, formatOnly: true });
+  } else {
+    sheet.getRange(range).clearContent();
+  }
+  return { status: "success", data: null, message: `Range '${range}' cleared` };
+}
+
+// 23. Get Sheet Info
+function getSheetInfo(e) {
+  validateParams(e, ["sheetName"]);
+  const ss = getSpreadsheet(e);
+  const sheetName = sanitizeInput(e.parameter.sheetName);
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Sheet '${sheetName}' not found`);
+  
+  return {
+    status: "success",
+    data: {
+      name: sheet.getName(),
+      maxRows: sheet.getMaxRows(),
+      maxColumns: sheet.getMaxColumns(),
+      lastRow: sheet.getLastRow(),
+      lastColumn: sheet.getLastColumn()
+    },
+    message: "Sheet info retrieved"
+  };
+}
+
+// 24. Delete Rows by Indices
+function deleteRowsByIndices(e) {
+  validateParams(e, ["sheetName", "indices"]);
+  const ss = getSpreadsheet(e);
+  const sheetName = sanitizeInput(e.parameter.sheetName);
+  const indices = JSON.parse(e.parameter.indices);
+  if (!Array.isArray(indices) || !indices.every(i => Number.isInteger(i) && i > 0)) {
+    throw new Error("Indices must be an array of positive integers");
+  }
+  const sheet = ss.getSheetByName(sheetName.trim());
+  if (!sheet) throw new Error(`Sheet '${sheetName}' not found`);
+  indices.sort((a, b) => b - a).forEach(row => {
+    if (row <= sheet.getLastRow()) {
+      sheet.deleteRow(row);
+    }
+  });
+  return { status: "success", data: null, message: `Deleted rows: ${indices.join(", ")}` };
+}
+
+// 25. Get nth File Info
+function getNthFileInfo(e) {
+  validateParams(e, ["folderId", "n"]);
+  const folderId = sanitizeInput(e.parameter.folderId);
+  const n = parseInt(e.parameter.n);
+  
+  if (folderId === "your_valid_folder_id_here") throw new Error("Invalid folderId");
+  if (n < 1) throw new Error("Invalid file index");
+  
+  const folder = DriveApp.getFolderById(folderId);
+  const files = folder.getFiles();
+  let count = 0;
+  
+  while (files.hasNext()) {
+    const file = files.next();
+    count++;
+    if (count === n) {
+      return {
+        status: "success",
+        data: {
+          url: file.getUrl(),
+          name: file.getName(),
+          mimeType: file.getMimeType(),
+          size: file.getSize()
+        },
+        message: "File info retrieved"
+      };
+    }
+  }
+  return { status: "error", data: null, message: "File not found" };
+}
+
+// 26. Upload File with Expiry
+function uploadFileWithExpiry(e) {
+  validateParams(e, ["folderId", "fileName", "fileContent", "mimeType", "expiryHours"]);
+  const folderId = sanitizeInput(e.parameter.folderId);
+  const fileName = sanitizeInput(e.parameter.fileName);
+  const fileContent = sanitizeInput(e.parameter.fileContent);
+  const mimeType = e.parameter.mimeType;
+  const expiryHours = parseInt(e.parameter.expiryHours);
+  const isBase64 = e.parameter.isBase64 === "true";
+  
+  if (folderId === "your_valid_folder_id_here") throw new Error("Invalid folderId");
+  if (fileContent.length > 6 * 1024 * 1024) throw new Error("File content exceeds 6MB limit");
+  if (expiryHours < 0) throw new Error("Invalid expiry hours");
+  
+  const folder = DriveApp.getFolderById(folderId);
+  const blob = isBase64
+    ? Utilities.newBlob(Utilities.base64Decode(fileContent), mimeType, fileName)
+    : Utilities.newBlob(fileContent, mimeType, fileName);
+  const file = folder.createFile(blob);
+  file.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.NONE);
+  
+  if (expiryHours > 0) {
+    const expiryDate = new Date(Date.now() + expiryHours * 3600 * 1000);
+    file.setProperty("expiryDate", expiryDate.toISOString());
+  }
+  
+  return {
+    status: "success",
+    data: {
+      url: file.getUrl(),
+      name: file.getName(),
+      mimeType: file.getMimeType(),
+      size: file.getSize(),
+      expiryHours: expiryHours
+    },
+    message: "File uploaded with expiry"
+  };
+}
+
+// 27. Delete Expired Files (Run via time-driven trigger)
+function deleteExpiredFiles() {
+  const folderId = DEFAULT_FOLDER_ID;
+  if (folderId === "your_valid_folder_id_here") throw new Error("Invalid folderId");
+  
+  const folder = DriveApp.getFolderById(folderId);
+  const files = folder.getFiles();
+  const now = new Date();
+  
+  while (files.hasNext()) {
+    const file = files.next();
+    const expiryDateStr = file.getProperty("expiryDate");
+    if (expiryDateStr) {
+      const expiryDate = new Date(expiryDateStr);
+      if (now > expiryDate) {
+        file.setTrashed(true);
+      }
+    }
+  }
+  return { status: "success", data: null, message: "Expired files deleted" };
+}
+
+// 28. Copy Sheet
+function copySheet(e) {
+  validateParams(e, ["sheetName", "newSheetName"]);
+  const ss = getSpreadsheet(e);
+  const sheetName = sanitizeInput(e.parameter.sheetName);
+  const newSheetName = sanitizeInput(e.parameter.newSheetName);
+  
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Sheet '${sheetName}' not found`);
+  if (ss.getSheetByName(newSheetName)) throw new Error(`Sheet '${newSheetName}' already exists`);
+  
+  const newSheet = sheet.copyTo(ss).setName(newSheetName);
+  return { status: "success", data: null, message: `Sheet copied to '${newSheetName}'` };
+}
+
+// 29. Rename Sheet
+function renameSheet(e) {
+  validateParams(e, ["sheetName", "newSheetName"]);
+  const ss = getSpreadsheet(e);
+  const sheetName = sanitizeInput(e.parameter.sheetName);
+  const newSheetName = sanitizeInput(e.parameter.newSheetName);
+  
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Sheet '${sheetName}' not found`);
+  if (ss.getSheetByName(newSheetName)) throw new Error(`Sheet '${newSheetName}' already exists`);
+  
+  sheet.setName(newSheetName);
+  return { status: "success", data: null, message: `Sheet renamed to '${newSheetName}'` };
+}
+
+// 30. Insert Row
+function insertRow(e) {
+  validateParams(e, ["sheetName", "rowIndex"]);
+  const ss = getSpreadsheet(e);
+  const sheetName = sanitizeInput(e.parameter.sheetName);
+  const rowIndex = parseInt(e.parameter.rowIndex);
+  
+  if (rowIndex < 1) throw new Error("Invalid row index");
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Sheet '${sheetName}' not found`);
+  
+  sheet.insertRowBefore(rowIndex);
+  return { status: "success", data: null, message: `Row inserted at ${rowIndex}` };
+}
+
+// 31. Insert Column
+function insertColumn(e) {
+  validateParams(e, ["sheetName", "colIndex"]);
+  const ss = getSpreadsheet(e);
+  const sheetName = sanitizeInput(e.parameter.sheetName);
+  const colIndex = parseInt(e.parameter.colIndex);
+  
+  if (colIndex < 1) throw new Error("Invalid column index");
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Sheet '${sheetName}' not found`);
+  
+  sheet.insertColumnBefore(colIndex);
+  return { status: "success", data: null, message: `Column inserted at ${colIndex}` };
+}
+
+// 32. Protect Range
+
+function protectRange(e) {
+  validateParams(e, ["sheetName", "range"]);
+  const ss = getSpreadsheet(e);
+  const sheetName = sanitizeInput(e.parameter.sheetName);
+  const rangeA1 = sanitizeInput(e.parameter.range);
+  const editors = e.parameter.editors ? JSON.parse(e.parameter.editors) : [];
+  if (e.parameter.editors && (!Array.isArray(editors) || !editors.every(email => typeof email === 'string'))) {
+    throw new Error("Editors must be an array of email addresses");
+  }
+  validateRange(rangeA1);
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Sheet '${sheetName}' not found`);
+  const protection = sheet.getRange(rangeA1).protect();
+  protection.removeEditors(protection.getEditors());
+  if (editors.length > 0) protection.setEditors(editors);
+  return { status: "success", data: null, message: `Range '${rangeA1}' protected` };
+}
+
+// 33. Clear Sheet
+function clearSheet(e) {
+  validateParams(e, ["sheetName"]);
+  const ss = getSpreadsheet(e);
+  const sheetName = sanitizeInput(e.parameter.sheetName);
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Sheet '${sheetName}' not found`);
+  
+  sheet.clear();
+  return { status: "success", data: null, message: `Sheet '${sheetName}' cleared` };
+}
+
+// 34. Batch Set Formulas
+function batchSetFormulas(e) {
+  validateParams(e, ["range", "formulas"]);
+  const ss = getSpreadsheet(e);
+  const sheetName = e.parameter.sheetName || FALLBACK_SHEET_NAME;
+  const range = sanitizeInput(e.parameter.range);
+  const formulas = JSON.parse(e.parameter.formulas);
+  validateRange(range);
+  if (!Array.isArray(formulas) || !formulas.every(row => Array.isArray(row))) {
+    throw new Error("Formulas must be a 2D array");
+  }
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Sheet '${sheetName}' not found`);
+  sheet.getRange(range).setFormulas(formulas);
+  return { status: "success", data: null, message: "Formulas set" };
+}
+
+// 35. Set Cell Format
+function setCellFormat(e) {
+  validateParams(e, ["range"]);
+  const ss = getSpreadsheet(e);
+  const sheetName = e.parameter.sheetName || FALLBACK_SHEET_NAME;
+  const range = sanitizeInput(e.parameter.range);
+  const numberFormat = e.parameter.numberFormat ? sanitizeInput(e.parameter.numberFormat) : null;
+  const textAlignment = e.parameter.textAlignment ? sanitizeInput(e.parameter.textAlignment) : null;
+  
+  validateRange(range);
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Sheet '${sheetName}' not found`);
+  
+  const rangeObj = sheet.getRange(range);
+  if (numberFormat) rangeObj.setNumberFormat(numberFormat);
+  if (textAlignment) rangeObj.setHorizontalAlignment(textAlignment);
+  
+  return { status: "success", data: null, message: "Cell format set" };
+}
+
+// 36. Manage Sheet Protection
+function manageSheetProtection(e) {
+  validateParams(e, ["sheetName", "protect"]);
+  const ss = getSpreadsheet(e);
+  const sheetName = sanitizeInput(e.parameter.sheetName);
+  const protect = e.parameter.protect === "true";
+  const editors = e.parameter.editors ? JSON.parse(e.parameter.editors) : [];
+  if (e.parameter.editors && (!Array.isArray(editors) || !editors.every(email => typeof email === 'string'))) {
+    throw new Error("Editors must be an array of email addresses");
+  }
+
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Sheet '${sheetName}' not found`);
+  
+  if (protect) {
+    const protection = sheet.protect();
+    protection.removeEditors(protection.getEditors());
+    if (editors.length > 0) protection.setEditors(editors);
+  } else {
+    const protections = sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET);
+    protections.forEach(p => p.remove());
+  }
+  return {
+    status: "success",
+    data: null,
+    message: `Sheet protection ${protect ? "enabled" : "disabled"}`
+  };
+}
+
+// 37. Get Last Row/Column
+function getLastRowColumn(e) {
+  const ss = getSpreadsheet(e);
+  const sheetName = e.parameter.sheetName || FALLBACK_SHEET_NAME;
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Sheet '${sheetName}' not found`);
+  
+  return {
+    status: "success",
+    data: {
+      lastRow: sheet.getLastRow(),
+      lastColumn: sheet.getLastColumn()
+    },
+    message: "Last row and column retrieved"
+  };
+}
+
+// 38. doGet - Simple JSON response
+function doGet(e) {
+  return ContentService.createTextOutput(
+    JSON.stringify({ status: "success", message: "API is live. Use POST requests to interact." })
+  ).setMimeType(ContentService.MimeType.JSON);
+}
+
+// 39. doPost - Main entry point
+function doPost(e) {
+  const action = e.parameter.action;
+  let result;
+  
+  try {
+    console.log(`Processing action: ${action} with parameters: ${JSON.stringify(e.parameter)}`);
+    
+    switch (action) {
+      case "sendData": result = sendDataToSheet(e); break;
+      case "editData": result = editData(e); break;
+      case "deleteData": result = deleteData(e); break;
+      case "searchData": result = searchData(e); break;
+      case "setFormula": result = setFormula(e); break;
+      case "setFormulaAndRead": result = setFormulaAndRead(e); break;
+      case "queryData": result = queryData(e); break;
+      case "readByColumn": result = readByColumn(e); break;
+      case "readByRow": result = readByRow(e); break;
+      case "readByRange": result = readByRange(e); break;
+      case "deleteSheet": result = deleteSheet(e); break;
+      case "createSheet": result = createSheet(e); break;
+      case "applyFilter": result = applyFilter(e); break;
+      case "findDuplicates": result = findDuplicates(e); break;
+      case "findTextIndex": result = findTextIndex(e); break;
+      case "findAllDuplicateIndices": result = findAllDuplicateIndices(e); break;
+      case "uploadFileToDrive": result = uploadFileToDrive(e); break;
+      case "getFileUrl": result = getFileUrl(e); break;
+      case "getAllSheetNames": result = getAllSheetNames(e); break;
+      case "getAllFileNames": result = getAllFileNames(e); break;
+      case "getSpreadsheetProperties": result = getSpreadsheetProperties(e); break;
+      case "clearRange": result = clearRange(e); break;
+      case "getSheetInfo": result = getSheetInfo(e); break;
+      case "deleteRowsByIndices": result = deleteRowsByIndices(e); break;
+      case "getNthFileInfo": result = getNthFileInfo(e); break;
+      case "uploadFileWithExpiry": result = uploadFileWithExpiry(e); break;
+      case "copySheet": result = copySheet(e); break;
+      case "renameSheet": result = renameSheet(e); break;
+      case "insertRow": result = insertRow(e); break;
+      case "insertColumn": result = insertColumn(e); break;
+      case "protectRange": result = protectRange(e); break;
+      case "clearSheet": result = clearSheet(e); break;
+      case "batchSetFormulas": result = batchSetFormulas(e); break;
+      case "setCellFormat": result = setCellFormat(e); break;
+      case "manageSheetProtection": result = manageSheetProtection(e); break;
+      case "getLastRowColumn": result = getLastRowColumn(e); break;
+     
+      default: throw new Error(`Invalid action: ${action}`);
+    }
+  } catch (error) {
+    result = { status: "error", data: null, message: error.message };
+    console.error(`Error in ${action}: ${error.message}`);
+  }
+  
+  return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+}
+
+
+
